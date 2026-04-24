@@ -1,0 +1,1200 @@
+'use client';
+
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import Image from 'next/image';
+import {
+  ArrowLeft, MessageSquare, Pin, Lock, Eye,
+  Send, AlertTriangle, Clock, ShieldCheck,
+  Edit2, Trash2, CornerUpLeft,
+  Bold, Italic, Underline, AlignCenter, Image as ImageIcon, Type, Palette
+} from 'lucide-react';
+
+type Author = {
+  id: number;
+  username: string;
+  avatar: string | null;
+  role: string;
+  roleColor: string;
+};
+
+type Comment = {
+  id: number;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+  author: Author;
+};
+
+type Topic = {
+  id: number;
+  title: string;
+  category: string;
+  pinned: boolean;
+  locked: boolean;
+  completed: boolean;
+  in_review?: boolean;
+  denied?: boolean;
+  views: number;
+  created_at: string;
+  author: { id: number; username: string };
+};
+
+type CharacterOption = {
+  guid: number;
+  name: string;
+  level: number;
+};
+
+type ForumSectionOption = {
+  id: string;
+  label: string;
+  parent_id?: string | null;
+  order_index?: number;
+};
+
+function getForumCharacterStorageKey(userId: number): string {
+  return `forum_selected_character_${userId}`;
+}
+
+const ROLE_BADGE: Record<string, string> = {
+  GM:        'bg-amber-900/50 border-amber-500/50 text-amber-300',
+  Moderador: 'bg-cyan-900/50  border-cyan-500/50  text-cyan-300',
+  Jugador:   'bg-purple-900/50 border-purple-500/40 text-purple-300',
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  announcements: 'Reporte de Bugs',
+  support: 'Soporte',
+  guides:  'Guías',
+  guild:   'Hermandades',
+  reports: 'Denuncias',
+  suggestions: 'Sugerencias',
+  migrations: 'Migraciones',
+};
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleString('es-ES', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60)    return 'ahora mismo';
+  if (diff < 3600)  return `hace ${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `hace ${Math.floor(diff / 3600)}h`;
+  return `hace ${Math.floor(diff / 86400)}d`;
+}
+
+function parseBBCode(text: string): string {
+  return text
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\[b\](.*?)\[\/b\]/gi, "<strong>$1</strong>")
+    .replace(/\[i\](.*?)\[\/i\]/gi, "<em>$1</em>")
+    .replace(/\[u\](.*?)\[\/u\]/gi, "<u>$1</u>")
+    .replace(/\[center\]([\s\S]*?)\[\/center\]/gi, "<div class='text-center w-full'>$1</div>")
+    .replace(/\[img\](.*?)\[\/img\]/gi, "<img src='$1' class='max-w-full rounded-md shadow-[0_0_15px_rgba(168,85,247,0.4)] my-2 border border-purple-500/30' alt='Imagen adjunta' />")
+    .replace(/\[color=(.*?)\](.*?)\[\/color\]/gi, "<span style='color:$1'>$2</span>")
+    .replace(/\[size=(.*?)\](.*?)\[\/size\]/gi, "<span style='font-size:$1'>$2</span>")
+    .replace(/\[font=(.*?)\](.*?)\[\/font\]/gi, "<span style='font-family:$1'>$2</span>");
+}
+
+function renderCommentContent(comment: string, role: string) {
+  return <div className="text-gray-100 leading-relaxed whitespace-pre-wrap break-words text-[15px] max-w-none" dangerouslySetInnerHTML={{ __html: parseBBCode(comment) }} />;
+}
+
+function AvatarColumn({ author, postIndex }: { author: Author; postIndex: number }) {
+  return (
+    <div className="flex flex-col items-center gap-2 w-[130px] shrink-0 pt-1">
+      {/* Avatar circle */}
+      <div className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-purple-600/70 shadow-[0_0_16px_rgba(147,51,234,0.4)]">
+        {author.avatar ? (
+          <Image
+            src={`/avatares/${author.avatar}`}
+            alt={author.username}
+            fill
+            unoptimized
+            className="object-cover"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-purple-900 to-indigo-900 flex items-center justify-center text-xl font-black text-purple-300">
+            {author.username.charAt(0).toUpperCase()}
+          </div>
+        )}
+      </div>
+
+      {/* Username */}
+      <span className="font-black text-sm text-white text-center leading-tight break-all">
+        {author.username}
+      </span>
+
+      {/* Role badge */}
+      <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[author.role] ?? ROLE_BADGE['Jugador']}`}>
+        {author.role}
+      </span>
+
+      {/* Post number tag */}
+      <span className="text-[10px] text-gray-600 mt-auto">
+        #{postIndex + 1}
+      </span>
+    </div>
+  );
+}
+
+export default function TopicPage() {
+  const params = useParams();
+  const router = useRouter();
+  const topicId = Number(params.id);
+
+  const [topic,    setTopic]    = useState<Topic | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState('');
+  const [user,     setUser]     = useState<{ id: number; username: string } | null>(null);
+
+  const [reply,        setReply]        = useState('');
+  const [posting,      setPosting]      = useState(false);
+  const [postError,    setPostError]    = useState('');
+  const [postSuccess,  setPostSuccess]  = useState(false);
+  const [characters, setCharacters] = useState<CharacterOption[]>([]);
+  const [selectedCharacterName, setSelectedCharacterName] = useState('');
+
+  const [editingId,    setEditingId]    = useState<number | null>(null);
+  const [editText,     setEditText]     = useState('');
+  const [editSaving,   setEditSaving]   = useState(false);
+  const [editError,    setEditError]    = useState('');
+  const [isGM,         setIsGM]         = useState(false);
+  const [isStaff,      setIsStaff]      = useState(false);
+  const [deletingTopic, setDeletingTopic] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [topicPriority, setTopicPriority] = useState<number>(0);
+  const [forumSections, setForumSections] = useState<ForumSectionOption[]>([]);
+  const [moveTargetCategory, setMoveTargetCategory] = useState('');
+  const [movingTopic, setMovingTopic] = useState(false);
+  const [movePickerOpen, setMovePickerOpen] = useState(false);
+  const [expandedMainSection, setExpandedMainSection] = useState('');
+  const [formatPromptOpen, setFormatPromptOpen] = useState(false);
+  const [formatPromptTag, setFormatPromptTag] = useState<'img' | 'color' | 'size' | 'font' | null>(null);
+  const [formatPromptTitle, setFormatPromptTitle] = useState('');
+  const [formatPromptHint, setFormatPromptHint] = useState('');
+  const [formatPromptPlaceholder, setFormatPromptPlaceholder] = useState('');
+  const [formatPromptValue, setFormatPromptValue] = useState('');
+  const [formatPromptPreviewError, setFormatPromptPreviewError] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<{ type: 'comment' | 'topic'; commentId?: number } | null>(null);
+  const [deleteModalLoading, setDeleteModalLoading] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const replyRef  = useRef<HTMLTextAreaElement>(null);
+  const movePickerRef = useRef<HTMLDivElement>(null);
+
+  const sortedSections = useMemo(() => {
+    return [...forumSections].sort((a, b) => {
+      const ao = Number(a.order_index || 0);
+      const bo = Number(b.order_index || 0);
+      if (ao !== bo) return ao - bo;
+      return String(a.label || '').localeCompare(String(b.label || ''));
+    });
+  }, [forumSections]);
+
+  const moveMainSections = useMemo(
+    () => sortedSections.filter((section) => !section.parent_id),
+    [sortedSections]
+  );
+
+  const moveChildrenByParent = useMemo(() => {
+    const map = new Map<string, ForumSectionOption[]>();
+    for (const section of sortedSections) {
+      const parentId = section.parent_id ? String(section.parent_id) : '';
+      if (!parentId) continue;
+      const current = map.get(parentId) || [];
+      current.push(section);
+      map.set(parentId, current);
+    }
+    return map;
+  }, [sortedSections]);
+
+  const currentMoveTargetId = String(moveTargetCategory || topic?.category || '');
+  const currentMoveTargetLabel =
+    sortedSections.find((section) => String(section.id) === currentMoveTargetId)?.label ||
+    (topic?.category || 'Seleccionar');
+
+  const insertBBCode = (openTag: string, closeTag: string) => {
+    if (!replyRef.current) return;
+    const el = replyRef.current;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const text = el.value;
+    
+    const before = text.substring(0, start);
+    const selected = text.substring(start, end);
+    const after = text.substring(end, text.length);
+
+    const newText = before + openTag + selected + closeTag + after;
+    setReply(newText);
+    
+    // Reposition cursor
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(start + openTag.length + selected.length, start + openTag.length + selected.length);
+    }, 0);
+  };
+
+  const insertPromptTag = (tag: string) => {
+    if (tag === 'img') {
+      setFormatPromptTag('img');
+      setFormatPromptTitle('Insertar imagen');
+      setFormatPromptHint('Pega la URL directa de la imagen (png, jpg, webp, gif).');
+      setFormatPromptPlaceholder('https://.../imagen.png');
+      setFormatPromptValue('');
+      setFormatPromptPreviewError(false);
+      setFormatPromptOpen(true);
+      return;
+    }
+
+    if (tag === 'color') {
+      setFormatPromptTag('color');
+      setFormatPromptTitle('Color de texto');
+      setFormatPromptHint('Usa nombre (red) o formato HEX (#ff0000).');
+      setFormatPromptPlaceholder('#ff0000');
+      setFormatPromptValue('');
+      setFormatPromptPreviewError(false);
+      setFormatPromptOpen(true);
+      return;
+    }
+
+    if (tag === 'size') {
+      setFormatPromptTag('size');
+      setFormatPromptTitle('Tamaño de fuente');
+      setFormatPromptHint('Ingresa solo número en px. Ejemplo: 24');
+      setFormatPromptPlaceholder('24');
+      setFormatPromptValue('');
+      setFormatPromptPreviewError(false);
+      setFormatPromptOpen(true);
+      return;
+    }
+
+    if (tag === 'font') {
+      setFormatPromptTag('font');
+      setFormatPromptTitle('Fuente de texto');
+      setFormatPromptHint('Ejemplo: Georgia, Verdana, Courier New');
+      setFormatPromptPlaceholder('Georgia');
+      setFormatPromptValue('');
+      setFormatPromptPreviewError(false);
+      setFormatPromptOpen(true);
+    }
+  };
+
+  const applyPromptTag = () => {
+    const val = formatPromptValue.trim();
+    if (!val || !formatPromptTag) return;
+
+    if (formatPromptTag === 'img') insertBBCode(`[img]${val}[/img]`, '');
+    if (formatPromptTag === 'color') insertBBCode(`[color=${val}]`, '[/color]');
+    if (formatPromptTag === 'size') insertBBCode(`[size=${val}px]`, '[/size]');
+    if (formatPromptTag === 'font') insertBBCode(`[font=${val}]`, '[/font]');
+
+    setFormatPromptOpen(false);
+    setFormatPromptTag(null);
+    setFormatPromptValue('');
+    setFormatPromptPreviewError(false);
+  };
+
+  useEffect(() => {
+    const raw = localStorage.getItem('user');
+    if (raw) {
+      try {
+        const parsedUser = JSON.parse(raw);
+        setUser(parsedUser);
+
+        if (parsedUser?.id) {
+          fetch(`/api/characters?accountId=${parsedUser.id}`)
+            .then((r) => r.json())
+            .then((d) => {
+              const chars = Array.isArray(d?.characters) ? d.characters : [];
+              const parsed: CharacterOption[] = chars
+                .map((c: any) => ({ guid: Number(c?.guid || 0), name: String(c?.name || ''), level: Number(c?.level || 0) }))
+                .filter((c: CharacterOption) => c.guid > 0 && c.name.length > 0)
+                .sort((a: CharacterOption, b: CharacterOption) => a.name.localeCompare(b.name));
+
+              setCharacters(parsed);
+              const saved = String(localStorage.getItem(getForumCharacterStorageKey(Number(parsedUser.id))) || '');
+              const preferred = parsed.some((p) => p.name === saved) ? saved : (parsed[0]?.name || '');
+              setSelectedCharacterName(preferred);
+            })
+            .catch(() => {
+              setCharacters([]);
+              setSelectedCharacterName('');
+            });
+
+          fetch(`/api/forum/sections?userId=${parsedUser.id}`)
+            .then((r) => r.json())
+            .then((d) => {
+              const rows = Array.isArray(d?.sections) ? d.sections : [];
+              const normalized = rows
+                .map((row: any) => ({
+                  id: String(row?.id || ''),
+                  label: String(row?.label || ''),
+                  parent_id: row?.parent_id ? String(row.parent_id) : null,
+                  order_index: Number(row?.order_index || 0),
+                }))
+                .filter((row: ForumSectionOption) => !!row.id && !!row.label);
+              setForumSections(normalized);
+            })
+            .catch(() => setForumSections([]));
+        }
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id || !selectedCharacterName) return;
+    localStorage.setItem(getForumCharacterStorageKey(Number(user.id)), selectedCharacterName);
+  }, [selectedCharacterName, user?.id]);
+
+  useEffect(() => {
+    if (!movePickerOpen) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (!movePickerRef.current) return;
+      if (!movePickerRef.current.contains(event.target as Node)) {
+        setMovePickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [movePickerOpen]);
+
+  const loadData = async () => {
+    try {
+      const raw = localStorage.getItem('user');
+      const currentUser = raw ? JSON.parse(raw) : null;
+      const userIdParam = currentUser?.id ? `?userId=${currentUser.id}` : '';
+
+      const [topicRes, commentsRes] = await Promise.all([
+        fetch(`/api/forum/topics/${topicId}`),
+        fetch(`/api/forum/topics/${topicId}/comments${userIdParam}`),
+      ]);
+      const topicData    = await topicRes.json();
+      const commentsData = await commentsRes.json();
+      if (!topicRes.ok)    throw new Error(topicData.error   || 'Tema no encontrado');
+      if (!commentsRes.ok) throw new Error(commentsData.error || 'Error cargando comentarios');
+      setTopic(topicData.topic);
+      setTopicPriority(topicData.topic.order_index ?? 0);
+      setComments(Array.isArray(commentsData.comments) ? commentsData.comments : []);
+      setIsGM(!!commentsData.isGM);
+      setIsStaff(!!commentsData.isStaff);
+    } catch (e: any) {
+      setError(e.message || 'Error desconocido');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!topicId) { setError('ID de tema inválido'); setLoading(false); return; }
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicId]);
+
+  const handleQuote = (c: Comment) => {
+    const lines = c.comment.split('\n').map(l => `> ${l}`).join('\n');
+    setReply(prev => (prev ? `${prev}\n\n` : '') + `> **${c.author.username}** escribió:\n${lines}\n\n`);
+    replyRef.current?.focus();
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
+  const handleEditStart = (c: Comment) => {
+    setEditingId(c.id);
+    setEditText(c.comment);
+    setEditError('');
+  };
+
+  const handleEditCancel = () => {
+    setEditingId(null);
+    setEditText('');
+    setEditError('');
+  };
+
+  const handleEditSave = async (commentId: number) => {
+    if (!user) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const res = await fetch(`/api/forum/topics/${topicId}/comments`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, commentId, comment: editText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al editar');
+      setEditingId(null);
+      await loadData();
+    } catch (err: any) {
+      setEditError(err.message);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDelete = async (commentId: number) => {
+    if (!user) return;
+    setDeleteModal({ type: 'comment', commentId });
+    setDeleteModalError('');
+  };
+
+  const executeDeleteComment = async (commentId: number) => {
+    if (!user) return;
+    try {
+      const res = await fetch(
+        `/api/forum/topics/${topicId}/comments?commentId=${commentId}&userId=${user.id}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al eliminar');
+      await loadData();
+    } catch (err: any) {
+      throw new Error(err.message || 'No se pudo eliminar el comentario');
+    }
+  };
+
+  const handleDeleteTopic = async () => {
+    if (!user || !isGM) return;
+    setDeleteModal({ type: 'topic' });
+    setDeleteModalError('');
+  };
+
+  const executeDeleteTopic = async () => {
+    if (!user || !isGM) return;
+    setDeletingTopic(true);
+    try {
+      const res = await fetch(`/api/forum/topics/${topicId}?userId=${user.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error eliminando tema');
+      router.push('/forum');
+    } catch (err: any) {
+      throw new Error(err.message || 'No se pudo eliminar el tema');
+    } finally {
+      setDeletingTopic(false);
+    }
+  };
+
+  const confirmDeleteFromModal = async () => {
+    if (!deleteModal) return;
+    setDeleteModalLoading(true);
+    setDeleteModalError('');
+    try {
+      if (deleteModal.type === 'comment') {
+        await executeDeleteComment(Number(deleteModal.commentId));
+      } else {
+        await executeDeleteTopic();
+      }
+      setDeleteModal(null);
+    } catch (err: any) {
+      setDeleteModalError(err.message || 'No se pudo completar la acción');
+    } finally {
+      setDeleteModalLoading(false);
+    }
+  };
+
+  const handlePost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) { router.push('/'); return; }
+    if (!selectedCharacterName.trim()) {
+      setPostError('Selecciona un personaje para responder.');
+      return;
+    }
+
+    setPosting(true);
+    setPostError('');
+    setPostSuccess(false);
+
+    try {
+      const res = await fetch(`/api/forum/topics/${topicId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, comment: reply, characterName: selectedCharacterName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error publicando');
+      setReply('');
+      setPostSuccess(true);
+      await loadData();
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        setPostSuccess(false);
+      }, 200);
+    } catch (err: any) {
+      setPostError(err.message);
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleSetTopicStatus = async (status: 'pending' | 'review' | 'solved' | 'denied') => {
+    if (!user || !isStaff || !topic) return;
+    setUpdatingStatus(true);
+    try {
+      const res = await fetch(`/api/forum/topics/${topicId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, status, orderIndex: topicPriority }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el estado del tema');
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Error actualizando estado del tema');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleMoveTopicCategory = async () => {
+    if (!user || !isStaff || !topic) return;
+    const target = String(moveTargetCategory || '').trim();
+    if (!target) {
+      alert('Selecciona una sección de destino.');
+      return;
+    }
+    if (target === String(topic.category || '')) {
+      alert('El tema ya está en esa sección.');
+      return;
+    }
+
+    setMovingTopic(true);
+    try {
+      const currentStatus: 'pending' | 'review' | 'solved' | 'denied' = topic.denied
+        ? 'denied'
+        : topic.completed
+          ? 'solved'
+          : topic.in_review
+            ? 'review'
+            : 'pending';
+
+      const res = await fetch(`/api/forum/topics/${topicId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, status: currentStatus, targetCategory: target }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo mover el tema.');
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Error moviendo el tema');
+    } finally {
+      setMovingTopic(false);
+    }
+  };
+
+  /* ── Loading ── */
+  if (loading) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-[#04040a]">
+        <div className="w-14 h-14 rounded-full border-4 border-purple-900 border-t-purple-400 animate-spin" />
+      </main>
+    );
+  }
+
+  /* ── Error ── */
+  if (error || !topic) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-[#04040a] text-white px-6">
+        <div className="text-center">
+          <AlertTriangle className="w-12 h-12 text-rose-400 mx-auto mb-3" />
+          <p className="text-lg font-bold text-rose-300">{error || 'Tema no encontrado'}</p>
+          <Link href="/forum" className="mt-4 inline-block text-purple-400 hover:text-purple-300 underline text-sm">
+            Volver al foro
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main
+      className="min-h-screen pt-28 pb-20 text-white selection:bg-purple-600/30 relative overflow-x-hidden"
+      style={{
+        backgroundImage: "url('/fono.png')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      <div className="absolute inset-0 bg-black/65" />
+
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 relative z-10">
+
+        {/* Back + breadcrumb */}
+        <div className="flex items-center gap-2 mb-6 text-sm text-gray-400">
+          <Link href="/forum" className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors">
+            <ArrowLeft className="w-4 h-4" /> Foro
+          </Link>
+          <span>/</span>
+          <span className="text-gray-500">{CATEGORY_LABELS[topic.category] ?? topic.category}</span>
+          <span>/</span>
+          <span className="text-gray-300 truncate max-w-xs">{topic.title}</span>
+        </div>
+
+        {/* Topic header panel */}
+        <div className="relative z-40 overflow-visible rounded-3xl border border-purple-900/40 bg-black/50 backdrop-blur-xl px-6 py-5 mb-6 shadow-[0_0_40px_rgba(105,55,180,0.2)]">
+          <div className="flex items-start gap-3 flex-wrap">
+            {topic.pinned && <Pin  className="w-5 h-5 text-amber-400 shrink-0 mt-1" />}
+            {topic.locked && <Lock className="w-5 h-5 text-rose-400  shrink-0 mt-1" />}
+            <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight flex-1">
+              {topic.title}
+            </h1>
+            {user && isStaff && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => handleSetTopicStatus('pending')}
+                  disabled={updatingStatus}
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                    !topic.completed && !topic.in_review
+                      ? 'border-slate-500/70 bg-slate-800/60 text-slate-100'
+                      : 'border-slate-700/60 bg-slate-950/35 text-slate-300 hover:bg-slate-900/45'
+                  }`}
+                  title="Marcar tema como pendiente"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {updatingStatus ? 'ACTUALIZANDO...' : 'Pendiente'}
+                </button>
+
+                <button
+                  onClick={() => handleSetTopicStatus('review')}
+                  disabled={updatingStatus}
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                    !topic.completed && !!topic.in_review
+                      ? 'border-amber-600/70 bg-amber-900/45 text-amber-200'
+                      : 'border-amber-700/60 bg-amber-950/35 text-amber-300 hover:bg-amber-900/45'
+                  }`}
+                  title="Marcar tema en revisión"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {updatingStatus ? 'ACTUALIZANDO...' : 'En revisión'}
+                </button>
+
+                <button
+                  onClick={() => handleSetTopicStatus('solved')}
+                  disabled={updatingStatus}
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                    topic.completed
+                      ? 'border-emerald-700/70 bg-emerald-950/45 text-emerald-200'
+                      : 'border-emerald-700/60 bg-emerald-950/35 text-emerald-300 hover:bg-emerald-900/45'
+                  }`}
+                  title="Marcar tema como solucionado"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {updatingStatus ? 'ACTUALIZANDO...' : 'Solucionado'}
+                </button>
+
+                <button
+                  onClick={() => handleSetTopicStatus('denied')}
+                  disabled={updatingStatus}
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black uppercase tracking-wider transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                    topic.denied
+                      ? 'border-rose-700/70 bg-rose-950/45 text-rose-200'
+                      : 'border-rose-700/60 bg-rose-950/35 text-rose-300 hover:bg-rose-900/45'
+                  }`}
+                  title="Marcar tema como denegado"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {updatingStatus ? 'ACTUALIZANDO...' : 'Denegado'}
+                </button>
+
+                <div className="flex items-center gap-2 border-l border-white/10 pl-3">
+                  <label className="text-[9px] uppercase tracking-widest text-cyan-500 font-bold">Prioridad:</label>
+                  <input 
+                    type="number"
+                    value={topicPriority}
+                    onChange={(e) => setTopicPriority(Number(e.target.value))}
+                    className="w-16 h-8 bg-black/50 border border-cyan-500/30 rounded-lg text-center text-xs text-white focus:outline-none focus:border-cyan-400"
+                  />
+                  <button 
+                    onClick={() => handleSetTopicStatus(
+                      (topic.denied ? 'denied' : topic.completed ? 'solved' : topic.in_review ? 'review' : 'pending') as any
+                    )}
+                    disabled={updatingStatus}
+                    className="h-8 px-2 rounded-lg bg-cyan-900/40 border border-cyan-500/30 text-[10px] text-cyan-300 hover:bg-cyan-800/60 transition-colors"
+                  >
+                    ✓
+                  </button>
+                </div>
+
+                <div className="inline-flex items-center gap-2 pl-1">
+                  <div className="relative" ref={movePickerRef}>
+                    <button
+                      type="button"
+                      onClick={() => setMovePickerOpen((v) => !v)}
+                      disabled={movingTopic}
+                      className="inline-flex h-9 min-w-[210px] items-center justify-between gap-2 rounded-lg bg-black/50 border border-cyan-500/35 px-3 text-xs text-cyan-100 focus:outline-none focus:border-cyan-400/60 disabled:opacity-60"
+                      title="Seleccionar sección destino"
+                    >
+                      <span className="truncate">{currentMoveTargetLabel}</span>
+                      <span className="text-cyan-300">▾</span>
+                    </button>
+
+                    {movePickerOpen && (
+                      <div className="absolute right-0 mt-2 w-[290px] max-h-80 overflow-y-auto rounded-xl border border-cyan-500/30 bg-[#090f19]/95 shadow-[0_16px_40px_rgba(0,0,0,0.55)] z-[140] p-2">
+                        <p className="px-2 pb-2 text-[10px] uppercase tracking-[0.18em] text-cyan-300 font-black">Mover a sección</p>
+                        <div className="space-y-1">
+                          {moveMainSections.map((main) => {
+                            const children = moveChildrenByParent.get(String(main.id)) || [];
+                            const expanded = expandedMainSection === String(main.id);
+                            const isCurrent = currentMoveTargetId === String(main.id);
+
+                            return (
+                              <div key={`main-${main.id}`} className="rounded-lg border border-cyan-500/15 bg-black/20">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (children.length === 0) {
+                                      setMoveTargetCategory(String(main.id));
+                                      setMovePickerOpen(false);
+                                      return;
+                                    }
+                                    setExpandedMainSection((v) => (v === String(main.id) ? '' : String(main.id)));
+                                  }}
+                                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-bold transition-colors ${isCurrent ? 'text-cyan-100 bg-cyan-900/25' : 'text-slate-200 hover:bg-cyan-900/15'}`}
+                                >
+                                  <span className="truncate">{main.label}</span>
+                                  <span className="text-cyan-300 text-[10px]">{children.length > 0 ? (expanded ? '▴' : '▾') : '•'}</span>
+                                </button>
+
+                                {expanded && children.length > 0 && (
+                                  <div className="px-2 pb-2 space-y-1">
+                                    {children.map((sub) => {
+                                      const isSelected = currentMoveTargetId === String(sub.id);
+                                      return (
+                                        <button
+                                          key={`sub-${sub.id}`}
+                                          type="button"
+                                          onClick={() => {
+                                            setMoveTargetCategory(String(sub.id));
+                                            setMovePickerOpen(false);
+                                          }}
+                                          className={`w-full text-left rounded-md border px-2 py-1.5 text-xs transition-colors ${isSelected ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-100' : 'border-cyan-900/30 bg-black/25 text-slate-200 hover:bg-cyan-900/15'}`}
+                                        >
+                                          ↳ {sub.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleMoveTopicCategory}
+                    disabled={movingTopic || !moveTargetCategory}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-700/60 bg-cyan-950/35 text-cyan-200 hover:bg-cyan-900/45 disabled:opacity-60 disabled:cursor-not-allowed text-xs font-black uppercase tracking-wider transition-all"
+                    title="Mover tema a la sección seleccionada"
+                  >
+                    {movingTopic ? 'MOVIENDO...' : 'Mover'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {user && isGM && (
+              <button
+                onClick={handleDeleteTopic}
+                disabled={deletingTopic}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-rose-700/60 bg-rose-950/40 text-rose-300 hover:text-rose-200 hover:bg-rose-900/50 disabled:opacity-60 disabled:cursor-not-allowed text-xs font-black uppercase tracking-wider transition-all"
+                title="Borrar tema completo"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deletingTopic ? 'BORRANDO...' : 'BORRAR TEMA'}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-gray-400">
+            <span className="flex items-center gap-1">
+              <MessageSquare className="w-3.5 h-3.5" />
+              {comments.length} {comments.length === 1 ? 'respuesta' : 'respuestas'}
+            </span>
+            <span className="flex items-center gap-1">
+              <Eye className="w-3.5 h-3.5" />
+              {topic.views} vistas
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              {formatDate(topic.created_at)}
+            </span>
+            {topic.locked && (
+              <span className="flex items-center gap-1 text-rose-400 font-semibold">
+                <Lock className="w-3.5 h-3.5" /> Tema cerrado
+              </span>
+            )}
+            {topic.completed && (
+              <span className="flex items-center gap-1 text-emerald-300 font-semibold">
+                <ShieldCheck className="w-3.5 h-3.5" /> Completado por staff
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Comments */}
+        <div className="relative z-10 space-y-4 mb-8">
+          {comments.map((c, idx) => (
+            <div
+              key={c.id}
+              className="rounded-3xl border border-purple-900/40 bg-black/45 backdrop-blur-sm overflow-hidden shadow-[0_4px_30px_rgba(0,0,0,0.5)]"
+            >
+              <div className="flex gap-0">
+                {/* Left: profile column */}
+                <div className="hidden sm:flex flex-col items-center gap-2 px-5 py-5 border-r border-purple-900/30 bg-black/30 w-[150px] shrink-0">
+                  <div className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-purple-600/70 shadow-[0_0_16px_rgba(147,51,234,0.35)]">
+                    {c.author.avatar ? (
+                      <Image
+                        src={`/avatares/${c.author.avatar}`}
+                        alt={c.author.username}
+                        fill
+                        unoptimized
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-purple-900 to-indigo-900 flex items-center justify-center text-xl font-black text-purple-300">
+                        {c.author.username.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <span className="font-black text-sm text-white text-center break-all leading-tight">
+                    {c.author.username}
+                  </span>
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[c.author.role] ?? ROLE_BADGE['Jugador']}`}>
+                    {c.author.role}
+                  </span>
+                  <span className="text-[10px] text-gray-600 mt-auto">#{idx + 1}</span>
+                </div>
+
+                {/* Right: message */}
+                <div className="flex-1 flex flex-col min-w-0">
+                  {/* Post header bar */}
+                  <div className="flex items-center justify-between gap-2 px-5 py-2 border-b border-purple-900/25 bg-purple-950/20">
+                    {/* Mobile: show username here */}
+                    <div className="flex items-center gap-2 sm:hidden">
+                      <div className="relative w-7 h-7 rounded-full overflow-hidden border border-purple-600/60">
+                        {c.author.avatar ? (
+                          <Image src={`/avatares/${c.author.avatar}`} alt={c.author.username} fill unoptimized className="object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-purple-900 to-indigo-900 flex items-center justify-center text-xs font-black text-purple-300">
+                            {c.author.username.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      <span className="font-bold text-sm text-white">{c.author.username}</span>
+                      <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${ROLE_BADGE[c.author.role] ?? ROLE_BADGE['Jugador']}`}>
+                        {c.author.role}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-gray-500 ml-auto flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {timeAgo(c.created_at)}
+                      <span className="hidden sm:inline ml-1 text-gray-600">· {formatDate(c.created_at)}</span>
+                    </span>
+                  </div>
+
+                  {/* Message body */}
+                  <div className="px-5 py-5 bg-gray-900/30 flex-1">
+                    {editingId === c.id ? (
+                      <div className="space-y-3">
+                        <textarea
+                          rows={6}
+                          className="w-full bg-black/60 border border-purple-900/50 rounded-2xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/60 resize-none text-[15px] leading-relaxed"
+                          value={editText}
+                          onChange={e => setEditText(e.target.value)}
+                          disabled={editSaving}
+                        />
+                        {editError && (
+                          <p className="text-rose-400 text-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> {editError}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleEditSave(c.id)}
+                            disabled={editSaving || !editText.trim()}
+                            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-black uppercase tracking-wider transition-all"
+                          >
+                            {editSaving ? 'GUARDANDO...' : 'GUARDAR'}
+                          </button>
+                          <button
+                            onClick={handleEditCancel}
+                            disabled={editSaving}
+                            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-gray-200 text-xs font-bold uppercase tracking-wider transition-all"
+                          >
+                            CANCELAR
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      renderCommentContent(c.comment, c.author.role)
+                    )}
+
+                    {/* Action bar */}
+                    {editingId !== c.id && (
+                      <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/5">
+                        {user && !topic.locked && (
+                          <button
+                            onClick={() => handleQuote(c)}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 transition-all"
+                            title="Citar"
+                          >
+                            <CornerUpLeft className="w-3.5 h-3.5" /> Citar
+                          </button>
+                        )}
+                        {user && user.id === c.author.id && !topic.locked && (
+                          <button
+                            onClick={() => handleEditStart(c)}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs text-gray-400 hover:text-cyan-300 hover:bg-cyan-900/20 transition-all"
+                            title="Editar"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" /> Editar
+                          </button>
+                        )}
+                        {user && (user.id === c.author.id || isGM) && (
+                          <button
+                            onClick={() => handleDelete(c.id)}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs text-gray-400 hover:text-rose-400 hover:bg-rose-900/20 transition-all ml-auto"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Eliminar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div ref={bottomRef} />
+
+        {/* Reply box */}
+        {!topic.locked ? (
+          user ? (
+            <div className="rounded-3xl border border-purple-900/40 bg-black/50 backdrop-blur-xl p-6 shadow-[0_0_40px_rgba(105,55,180,0.2)]">
+              <h2 className="flex items-center gap-2 text-lg font-black text-purple-300 mb-4">
+                <MessageSquare className="w-5 h-5" /> Publicar Respuesta
+              </h2>
+              <form onSubmit={handlePost} className="space-y-4">
+                <div className="rounded-xl border border-amber-500/35 bg-amber-900/10 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300 font-black mb-2">Responder como personaje</p>
+                  <select
+                    className="w-full bg-black/50 border border-amber-500/45 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400/60"
+                    value={selectedCharacterName}
+                    onChange={(e) => setSelectedCharacterName(e.target.value)}
+                  >
+                    {characters.length === 0 ? (
+                      <option value="">Sin personajes disponibles</option>
+                    ) : (
+                      characters.map((c) => <option key={c.guid} value={c.name}>{c.name} (lvl {c.level})</option>)
+                    )}
+                  </select>
+                </div>
+
+                <div className="bg-[#03060d]/60 border border-purple-500/20 rounded-2xl overflow-hidden flex flex-col">
+                  <div className="border-b border-purple-500/20 bg-purple-900/10 p-2 flex flex-wrap gap-1">
+                    <button type="button" onClick={() => insertBBCode('[b]', '[/b]')} className="p-2 hover:bg-purple-900/40 rounded-lg text-gray-300 hover:text-white transition-colors" title="Negrita"><Bold className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => insertBBCode('[i]', '[/i]')} className="p-2 hover:bg-purple-900/40 rounded-lg text-gray-300 hover:text-white transition-colors" title="Cursiva"><Italic className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => insertBBCode('[u]', '[/u]')} className="p-2 hover:bg-purple-900/40 rounded-lg text-gray-300 hover:text-white transition-colors" title="Subrayado"><Underline className="w-4 h-4" /></button>
+                    <div className="w-px h-6 bg-purple-500/20 mx-1 self-center" />
+                    <button type="button" onClick={() => insertBBCode('[center]', '[/center]')} className="p-2 hover:bg-purple-900/40 rounded-lg text-gray-300 hover:text-white transition-colors" title="Centrar"><AlignCenter className="w-4 h-4" /></button>
+                    <div className="w-px h-6 bg-purple-500/20 mx-1 self-center" />
+                    <button type="button" onClick={() => insertPromptTag('color')} className="p-2 hover:bg-purple-900/40 rounded-lg text-cyan-300 hover:text-cyan-200 transition-colors" title="Color de Texto"><Palette className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => insertPromptTag('size')} className="p-2 hover:bg-purple-900/40 rounded-lg text-cyan-300 hover:text-cyan-200 transition-colors" title="Tamaño de Fuente"><Type className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => insertPromptTag('img')} className="p-2 hover:bg-purple-900/40 rounded-lg text-fuchsia-400 hover:text-fuchsia-300 transition-colors" title="Insertar Imagen"><ImageIcon className="w-4 h-4" /></button>
+                  </div>
+                  <textarea
+                    ref={replyRef}
+                    placeholder="Escribe tu respuesta aquí..."
+                    rows={6}
+                    className="w-full bg-transparent px-5 py-4 text-white placeholder:text-gray-500 focus:outline-none resize-y text-[15px] leading-relaxed block"
+                    value={reply}
+                    onChange={e => { setReply(e.target.value); setPostError(''); }}
+                    disabled={posting}
+                  />
+                </div>
+                {postError && (
+                  <div className="flex items-center gap-2 text-rose-300 text-sm">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />{postError}
+                  </div>
+                )}
+                {postSuccess && (
+                  <p className="text-emerald-400 text-sm">¡Comentario publicado!</p>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-500">{reply.length} / 10.000</span>
+                  <button
+                    type="submit"
+                    disabled={posting || !reply.trim() || !selectedCharacterName || characters.length === 0}
+                    className={`inline-flex items-center gap-2 px-7 py-3 rounded-2xl font-black text-sm uppercase tracking-wider transition-all shadow-[0_8px_24px_rgba(91,33,182,0.4)] ${
+                      posting || !reply.trim() || !selectedCharacterName || characters.length === 0
+                        ? 'bg-purple-800/50 cursor-not-allowed opacity-60'
+                        : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600'
+                    }`}
+                  >
+                    <Send className="w-4 h-4" />
+                    {posting ? 'PUBLICANDO...' : 'PUBLICAR COMENTARIO'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-purple-900/40 bg-black/40 backdrop-blur-sm px-6 py-8 text-center">
+              <p className="text-gray-400 mb-3">Debes iniciar sesión para responder.</p>
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 font-black text-sm uppercase tracking-wider transition-all"
+              >
+                <ShieldCheck className="w-4 h-4" /> Iniciar Sesión
+              </Link>
+            </div>
+          )
+        ) : (
+          <div className="rounded-3xl border border-rose-900/40 bg-rose-950/20 backdrop-blur-sm px-6 py-5 flex items-center gap-3 text-rose-300">
+            <Lock className="w-5 h-5 shrink-0" />
+            <p className="font-semibold">Este tema está cerrado. No se pueden publicar más respuestas.</p>
+          </div>
+        )}
+      </div>
+
+      {formatPromptOpen && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" onClick={() => setFormatPromptOpen(false)}>
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-lg rounded-3xl border border-amber-400/30 bg-[#0a0f19]/95 shadow-[0_0_40px_rgba(245,158,11,0.25)] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-amber-500/20 bg-gradient-to-r from-amber-900/25 to-purple-900/25">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-300">Editor Shadow Shop</p>
+              <h3 className="text-lg font-black text-white mt-1">{formatPromptTitle}</h3>
+              <p className="text-xs text-gray-400 mt-1">{formatPromptHint}</p>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <input
+                autoFocus
+                type="text"
+                value={formatPromptValue}
+                onChange={(e) => {
+                  setFormatPromptValue(e.target.value);
+                  if (formatPromptTag === 'img') setFormatPromptPreviewError(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    applyPromptTag();
+                  }
+                }}
+                placeholder={formatPromptPlaceholder}
+                className="w-full h-12 rounded-xl border border-amber-500/30 bg-black/50 px-4 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-400/70"
+              />
+
+              {formatPromptTag === 'img' && (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-cyan-300/90 font-semibold">
+                    Tip: usa enlaces directos que terminen en formato de imagen para que se vea en el post.
+                  </p>
+                  {formatPromptValue.trim() ? (
+                    <div className="rounded-xl border border-cyan-400/30 bg-black/45 p-2">
+                      {!formatPromptPreviewError ? (
+                        <img
+                          src={formatPromptValue.trim()}
+                          alt="Preview"
+                          className="max-h-48 w-auto max-w-full object-contain mx-auto rounded-lg"
+                          onError={() => setFormatPromptPreviewError(true)}
+                        />
+                      ) : (
+                        <p className="text-xs text-rose-300 text-center py-3 font-semibold">
+                          No se pudo cargar la imagen con esa URL.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormatPromptOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-white/20 text-gray-300 hover:text-white hover:bg-white/5 text-xs font-black uppercase tracking-widest"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={applyPromptTag}
+                  className="px-4 py-2 rounded-xl border border-amber-400/40 bg-gradient-to-r from-amber-600/80 to-orange-600/80 text-white hover:from-amber-500 hover:to-orange-500 text-xs font-black uppercase tracking-widest shadow-[0_0_20px_rgba(245,158,11,0.35)]"
+                >
+                  Insertar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteModal && (
+        <div className="fixed inset-0 z-[96] flex items-center justify-center p-4" onClick={() => !deleteModalLoading && setDeleteModal(null)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-xl rounded-3xl border border-rose-500/35 bg-[#110a12]/95 shadow-[0_0_42px_rgba(244,63,94,0.25)] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-rose-500/20 bg-gradient-to-r from-rose-900/30 to-purple-900/20">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-rose-300">Confirmación crítica</p>
+              <h3 className="text-lg font-black text-white mt-1">
+                {deleteModal.type === 'topic' ? 'Eliminar tema completo' : 'Eliminar comentario'}
+              </h3>
+              <p className="text-xs text-rose-200/80 mt-1">
+                {deleteModal.type === 'topic'
+                  ? 'Esta acción borra también todos los comentarios y no se puede deshacer.'
+                  : 'Esta acción eliminará el comentario de forma permanente.'}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {deleteModalError && (
+                <div className="rounded-xl border border-rose-400/35 bg-rose-900/25 px-4 py-3 text-sm text-rose-200">
+                  {deleteModalError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={deleteModalLoading}
+                  onClick={() => setDeleteModal(null)}
+                  className="px-4 py-2 rounded-xl border border-white/20 text-gray-300 hover:text-white hover:bg-white/5 text-xs font-black uppercase tracking-widest disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteModalLoading}
+                  onClick={confirmDeleteFromModal}
+                  className="px-4 py-2 rounded-xl border border-rose-400/40 bg-gradient-to-r from-rose-700/90 to-red-700/90 text-white hover:from-rose-600 hover:to-red-600 text-xs font-black uppercase tracking-widest shadow-[0_0_20px_rgba(244,63,94,0.35)] disabled:opacity-60"
+                >
+                  {deleteModalLoading ? 'Eliminando...' : 'Sí, eliminar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}

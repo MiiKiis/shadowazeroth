@@ -1,0 +1,159 @@
+/*
+  Shadow Azeroth Armory scoped styles.
+  Imported in src/app/armory/page.tsx, so it loads after global styles.
+*/
+
+.sa-armory-paperdoll {
+  --sa-slot-label-color: #91a3d2;
+  --sa-slot-size: 64px;
+}
+
+.sa-armory-paperdoll .sa-armory__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "rows"
+    "bottom";
+  gap: 14px;
+  align-items: start;
+  justify-content: center;
+  width: 100%;
+}
+
+.sa-armory-paperdoll .sa-gear-rows {
+  grid-area: rows;
+  display: grid;
+  gap: 8px;
+}
+
+.sa-armory-paperdoll .sa-gear-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  column-gap: clamp(56px, 12vw, 150px);
+}
+
+.sa-armory-paperdoll .sa-gear--bottom {
+  grid-area: bottom;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* Esto evitará que los slots se estiren como en tu foto */
+.sa-armory-paperdoll .sa-slot {
+  width: var(--sa-slot-size);
+  height: var(--sa-slot-size);
+  min-height: var(--sa-slot-size);
+  min-width: var(--sa-slot-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+  border-radius: 10px;
+  background-image: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(8, 12, 18, 0.92));
+  background-size: cover;
+  background-position: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.sa-armory-paperdoll .sa-slot::after {
+  content: attr(data-slot);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sa-slot-label-color);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.sa-armory-paperdoll .sa-slot-left::after {
+  right: -10px;
+  transform: translate(100%, -50%);
+}
+
+.sa-armory-paperdoll .sa-slot-right::after {
+  left: -10px;
+  transform: translate(-100%, -50%);
+}
+
+.sa-armory-paperdoll .sa-gear-row .sa-slot-left {
+  justify-self: start;
+}
+
+.sa-armory-paperdoll .sa-gear-row .sa-slot-right {
+  justify-self: end;
+  margin-left: auto;
+}
+
+.sa-armory-paperdoll .sa-slot-bottom::after {
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+}
+
+.sa-armory-paperdoll .sa-slot:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.2), 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.sa-armory-paperdoll .sa-slot-state {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  display: block;
+}
+
+.sa-armory-paperdoll .sa-slot-state--equipped {
+  background: radial-gradient(circle at 50% 35%, rgba(125, 211, 252, 0.25), rgba(30, 41, 59, 0.4));
+}
+
+.sa-armory-paperdoll .sa-slot-state--empty {
+  background: radial-gradient(circle at 50% 35%, rgba(148, 163, 184, 0.2), rgba(30, 41, 59, 0.35));
+}
+
+.sa-armory-paperdoll .sa-slot-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  display: block;
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 1024px) {
+  .sa-armory-paperdoll .sa-armory__grid {
+    gap: 12px;
+  }
+
+  .sa-armory-paperdoll .sa-gear-row {
+    column-gap: clamp(38px, 9vw, 90px);
+  }
+}
+
+@media (max-width: 640px) {
+  .sa-armory-paperdoll {
+    --sa-slot-size: 52px;
+  }
+
+  .sa-armory-paperdoll .sa-gear--bottom {
+    flex-wrap: wrap;
+  }
+
+  .sa-armory-paperdoll .sa-gear-row {
+    column-gap: clamp(22px, 6vw, 46px);
+  }
+
+  .sa-armory-paperdoll .sa-slot::after {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+}

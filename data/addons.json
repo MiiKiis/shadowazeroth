@@ -1,0 +1,40 @@
+[
+  {
+    "id": "lancher-1776685118277",
+    "name": "Lancher",
+    "url": "https://drive.google.com/drive/folders/1MIqr0BeqqWPII069rTAbk3Gz3rCvBdtZ?usp=sharing",
+    "images": [],
+    "categories": [
+      "Misceláneo",
+      "Combate",
+      "Barras de Acción"
+    ],
+    "createdAt": "2026-04-20T11:38:38.277Z"
+  },
+  {
+    "id": "consoleportlk-1776774210503",
+    "name": "ConsolePortLK",
+    "url": "https://drive.google.com/file/d/1VZ4AxAG3FB7L5q3VC4a8sUN2R9HURCCa/view?usp=sharing",
+    "description": "🎮 ConsolePortLK: Juega con Mando en Wrath of the Lich King\n✨ Características Principales\nInterfaz Radial Dinámica: Accede a tus habilidades mediante un sistema de anillos y combinaciones de botones intuitivas (L1/R1 + botones de acción).\n\nCursor Inteligente: Navega por los menús, el inventario y el árbol de talentos con un cursor optimizado para sticks analógicos.\n\nManejo de Cámara Estilo Acción: Incluye un sistema de cámara libre que hace que el combate se sienta como un juego de consola de última generación.\n\nConfiguración Rápida: Asistente de configuración inicial para detectar tu mando y asignar los botones básicos en menos de un minuto.\n\nCompatibilidad con Otros Addons: Diseñado para trabajar en conjunto con Immersion o Storyline para una experiencia RPG cinematográfica.\n\n\n🛠️ Cómo Configurar\n1 Conecta tu mando: Asegúrate de que Windows (o tu SO) reconozca el dispositivo.\n\n2 Instala WoWpadX: Para que WoW detecte el mando como teclas, se recomienda usar WoWMapper (u herramientas similares como DS4Windows o Steam Input) ejecutándose en segundo plano.\n\nActiva el Addon: Una vez en el juego, el asistente de ConsolePort se abrirá automáticamente para guiarte en la calibración.\n\n📜 Notas del Servidor\nHemos testeado esta versión de ConsolePort específicamente para nuestro núcleo 3.3.5a, asegurando que la latencia de entrada sea mínima y la compatibilidad con nuestras customizaciones sea total.",
+    "images": [
+      "https://ezbbwqlqtxbeynxjsqjt.supabase.co/storage/v1/object/sign/geektech/Untitled%20folder/mando%20imagens.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9jYTc5M2M5NC1jNzFhLTQxMzEtYTZmZC0xNmFkM2MwZTM4ZWMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJnZWVrdGVjaC9VbnRpdGxlZCBmb2xkZXIvbWFuZG8gaW1hZ2Vucy5wbmciLCJpYXQiOjE3NzY3NzM5NjUsImV4cCI6MTkzNDQ1Mzk2NX0.tA0x7bXeNWpgg1Zh_U_5lwtHsrfkmlacUFxeg9eJor4"
+    ],
+    "categories": [
+      "Cazador",
+      "Caballero de la Muerte",
+      "Brujo",
+      "Mago",
+      "Sacerdote",
+      "Paladín",
+      "Pícaro",
+      "Guerrero",
+      "Chamán",
+      "Druida",
+      "Barras de Acción",
+      "Combate",
+      "Interfaz",
+      "JcJ"
+    ],
+    "createdAt": "2026-04-21T12:23:30.503Z"
+  }
+]
